@@ -179,7 +179,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
     const xScale = i => pad.left + (i / (n - 1)) * W;
     const yScale = v => pad.top + H - ((v - minP) / (maxP - minP)) * H;
 
-    // Grid lines
     const gridCount = 5;
     for (let i = 0; i <= gridCount; i++) {
       const y = pad.top + (i / gridCount) * H;
@@ -196,7 +195,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
       ctx.fillText("$" + Math.round(val).toLocaleString(), pad.left - 8, y + 3.5);
     }
 
-    // X axis labels (every ~12 months)
     const step = Math.max(1, Math.floor(n / 8));
     for (let i = 0; i < n; i += step) {
       const x = xScale(i);
@@ -207,7 +205,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
       ctx.fillText(dateStr, x, pad.top + H + 20);
     }
 
-    // Price line
     ctx.beginPath();
     ctx.strokeStyle = CHART_COLORS.price + "55";
     ctx.lineWidth = 1.5;
@@ -218,7 +215,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
     });
     ctx.stroke();
 
-    // Trade markers
     if (trades) {
       const dateToIdx = {};
       series.forEach((d, i) => { dateToIdx[d.date] = i; });
@@ -246,7 +242,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
         ctx.fill();
       });
 
-      // SIP dots (monthly)
       series.forEach((d, i) => {
         const x = xScale(i);
         const y = yScale(d.close);
@@ -257,7 +252,6 @@ function LineChart({ series, trades, width = 680, height = 280 }) {
       });
     }
 
-    // Axes
     ctx.strokeStyle = CHART_COLORS.axis;
     ctx.lineWidth = 0.5;
     ctx.beginPath();
@@ -294,14 +288,12 @@ function PortfolioChart({ portfolioSeries, width = 680, height = 220 }) {
 
     const allVals = portfolioSeries.flatMap(d => [d.btd_value, d.sip_value]).filter(v => v > 0);
     if (allVals.length === 0) return;
-    const minV = 0;
     const maxV = Math.max(...allVals) * 1.08;
     const n = portfolioSeries.length;
 
     const xScale = i => pad.left + (i / (n - 1)) * W;
     const yScale = v => pad.top + H - (v / maxV) * H;
 
-    // Grid
     for (let i = 0; i <= 4; i++) {
       const y = pad.top + (i / 4) * H;
       const val = maxV - (i / 4) * maxV;
@@ -317,7 +309,6 @@ function PortfolioChart({ portfolioSeries, width = 680, height = 220 }) {
       ctx.fillText("$" + Math.round(val).toLocaleString(), pad.left - 8, y + 3.5);
     }
 
-    // X labels
     const step = Math.max(1, Math.floor(n / 8));
     portfolioSeries.forEach((d, i) => {
       if (i % step !== 0) return;
@@ -327,7 +318,6 @@ function PortfolioChart({ portfolioSeries, width = 680, height = 220 }) {
       ctx.fillText(d.date.slice(0, 7), xScale(i), pad.top + H + 20);
     });
 
-    // BTD line
     ctx.beginPath();
     ctx.strokeStyle = COLORS.btdLine;
     ctx.lineWidth = 2;
@@ -338,7 +328,6 @@ function PortfolioChart({ portfolioSeries, width = 680, height = 220 }) {
     });
     ctx.stroke();
 
-    // SIP line
     ctx.beginPath();
     ctx.strokeStyle = COLORS.sipLine;
     ctx.lineWidth = 2;
@@ -351,7 +340,6 @@ function PortfolioChart({ portfolioSeries, width = 680, height = 220 }) {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Axes
     ctx.strokeStyle = CHART_COLORS.axis;
     ctx.lineWidth = 0.5;
     ctx.beginPath();
@@ -369,7 +357,7 @@ function fmt(n, decimals = 2) {
   return n.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 function fmtPct(n) {
-  if (n === undefined || n === null) return "—";
+  if (n === undefined || n === null) return { val: "—", color: COLORS.textMuted };
   const color = n >= 0 ? COLORS.green : COLORS.red;
   return { val: (n >= 0 ? "+" : "") + fmt(n) + "%", color };
 }
@@ -385,7 +373,10 @@ export default function App() {
   const [error, setError] = useState(null);
   const [streamLog, setStreamLog] = useState("");
 
-  const setField = (k) => (v) => setConfig(c => ({ ...c, [k]: isNaN(parseFloat(v)) || typeof v === "string" && v.includes("-") ? v : parseFloat(v) }));
+  const setField = (k) => (v) => setConfig(c => ({
+    ...c,
+    [k]: isNaN(parseFloat(v)) || (typeof v === "string" && v.includes("-") && k.includes("date")) ? v : parseFloat(v) || v
+  }));
 
   const run = async () => {
     setLoading(true);
@@ -411,7 +402,7 @@ export default function App() {
       setStreamLog("Parsing results...");
 
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error("No JSON in response");
+      if (!jsonMatch) throw new Error("No JSON found in response");
       const parsed = JSON.parse(jsonMatch[0]);
       setResult(parsed);
       setStreamLog("");
@@ -473,7 +464,7 @@ export default function App() {
 
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "24px 24px 0" }}>
 
-        {/* README-style description */}
+        {/* README */}
         <div style={{
           background: COLORS.surface,
           border: `1px solid ${COLORS.border}`,
@@ -482,7 +473,9 @@ export default function App() {
           marginBottom: 24,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill={COLORS.textMuted}><path d="M0 1.75A.75.75 0 01.75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0111.006 1h4.245a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75h-4.507a2.25 2.25 0 00-1.591.659l-.622.621a.75.75 0 01-1.06 0l-.622-.621A2.25 2.25 0 005.258 13H.75a.75.75 0 01-.75-.75V1.75zm7.251 10.324l.004-5.073-.002-2.253A2.25 2.25 0 005.003 2.5H1.5v9h3.757a3.75 3.75 0 011.994.574zM8.755 4.75l-.004 7.322a3.752 3.752 0 011.992-.572H14.5v-9h-3.495a2.25 2.25 0 00-2.25 2.25z"/></svg>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill={COLORS.textMuted}>
+              <path d="M0 1.75A.75.75 0 01.75 1h4.253c1.227 0 2.317.59 3 1.501A3.744 3.744 0 0111.006 1h4.245a.75.75 0 01.75.75v10.5a.75.75 0 01-.75.75h-4.507a2.25 2.25 0 00-1.591.659l-.622.621a.75.75 0 01-1.06 0l-.622-.621A2.25 2.25 0 005.258 13H.75a.75.75 0 01-.75-.75V1.75zm7.251 10.324l.004-5.073-.002-2.253A2.25 2.25 0 005.003 2.5H1.5v9h3.757a3.75 3.75 0 011.994.574zM8.755 4.75l-.004 7.322a3.752 3.752 0 011.992-.572H14.5v-9h-3.495a2.25 2.25 0 00-2.25 2.25z"/>
+            </svg>
             <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>README.md</span>
           </div>
           <p style={{ margin: "0 0 6px", fontSize: 13, color: COLORS.textMuted, lineHeight: 1.6 }}>
@@ -509,7 +502,9 @@ export default function App() {
             alignItems: "center",
             gap: 8,
           }}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill={COLORS.textMuted}><path d="M8 0a8 8 0 100 16A8 8 0 008 0zm-.5 4.5A.5.5 0 018 4a.5.5 0 01.5.5v4a.5.5 0 01-.5.5.5.5 0 01-.5-.5v-4zm.5 7.5a.75.75 0 110-1.5.75.75 0 010 1.5z"/></svg>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill={COLORS.textMuted}>
+              <path d="M8 0a8 8 0 100 16A8 8 0 008 0zm-.5 4.5A.5.5 0 018 4a.5.5 0 01.5.5v4a.5.5 0 01-.5.5.5.5 0 01-.5-.5v-4zm.5 7.5a.75.75 0 110-1.5.75.75 0 010 1.5z"/>
+            </svg>
             <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textMuted }}>inputs & configuration</span>
           </div>
           <div style={{ padding: "16px 20px" }}>
@@ -558,26 +553,14 @@ export default function App() {
                 alignItems: "center",
                 gap: 8,
                 fontFamily: "monospace",
-                transition: "all 0.15s",
               }}
             >
-              {loading ? (
-                <>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83">
-                      <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
-                    </path>
-                  </svg>
-                  Running backtest...
-                </>
-              ) : (
-                <>▶ Run Backtest</>
-              )}
+              {loading ? "Running backtest..." : "▶ Run Backtest"}
             </button>
           </div>
         </div>
 
-        {/* Stream log */}
+        {/* Status */}
         {streamLog && (
           <div style={{
             background: COLORS.surface,
@@ -588,9 +571,6 @@ export default function App() {
             fontSize: 12,
             color: COLORS.textMuted,
             fontFamily: "monospace",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
           }}>
             <span style={{ color: COLORS.orange }}>◉</span> {streamLog}
           </div>
@@ -614,7 +594,7 @@ export default function App() {
         {/* Results */}
         {result && (
           <>
-            {/* BTD Results Block */}
+            {/* BTD Block */}
             <div style={{
               background: COLORS.surface,
               border: `1px solid ${COLORS.border}`,
@@ -630,7 +610,7 @@ export default function App() {
                 gap: 10,
                 background: "#3fb95011",
               }}>
-                <span style={{ width: 10, height: 10, background: COLORS.green, borderRadius: 2, display: "inline-block" }}/>
+                <span style={{ width: 10, height: 10, background: COLORS.green, borderRadius: 2, display: "inline-block" }} />
                 <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.green, fontFamily: "monospace" }}>
                   STRATEGY PERFORMANCE: BUY THE DIP
                 </span>
@@ -651,7 +631,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* SIP Results Block */}
+            {/* SIP Block */}
             <div style={{
               background: COLORS.surface,
               border: `1px solid ${COLORS.border}`,
@@ -667,7 +647,7 @@ export default function App() {
                 gap: 10,
                 background: "#58a6ff11",
               }}>
-                <span style={{ width: 10, height: 10, background: COLORS.blue, borderRadius: 2, display: "inline-block" }}/>
+                <span style={{ width: 10, height: 10, background: COLORS.blue, borderRadius: 2, display: "inline-block" }} />
                 <span style={{ fontSize: 13, fontWeight: 700, color: COLORS.blue, fontFamily: "monospace" }}>
                   STRATEGY PERFORMANCE: MONTHLY SIP (${fmt(sip?.monthly_amount, 2)}/mo)
                 </span>
@@ -698,52 +678,43 @@ export default function App() {
               <div style={{
                 borderBottom: `1px solid ${COLORS.border}`,
                 padding: "10px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
               }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textMuted, fontFamily: "monospace" }}>
                   Strategy Evaluation Comparison ({config.ticker})
                 </span>
               </div>
               <div style={{ padding: "16px 20px" }}>
-                {/* Legend */}
                 <div style={{ display: "flex", gap: 20, marginBottom: 16, flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                    <span style={{ width: 20, height: 2, background: CHART_COLORS.price + "55", display: "inline-block" }}/>
+                    <span style={{ width: 20, height: 2, background: CHART_COLORS.price + "55", display: "inline-block" }} />
                     {config.ticker} Close Price
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                    <svg width="12" height="12" viewBox="0 0 12 12"><polygon points="6,0 12,12 0,12" fill={COLORS.initialBuy}/></svg>
+                    <svg width="12" height="12" viewBox="0 0 12 12"><polygon points="6,0 12,12 0,12" fill={COLORS.initialBuy} /></svg>
                     BTD Initial Trigger (-{(config.dip_threshold * 100).toFixed(1)}%: ${config.investment_amount.toLocaleString()})
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                    <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 10,10 0,10" fill={COLORS.subBuy}/></svg>
+                    <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 10,10 0,10" fill={COLORS.subBuy} /></svg>
                     BTD Subsequent (-{(config.subsequent_dip_threshold * 100).toFixed(1)}%: ${config.subsequent_investment_amount.toLocaleString()})
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.sipDot + "99", display: "inline-block" }}/>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.sipDot + "99", display: "inline-block" }} />
                     Monthly SIP (${config.manual_sip_amount.toLocaleString()}/mo)
                   </div>
                 </div>
 
                 {result.price_series && (
-                  <LineChart
-                    series={result.price_series}
-                    trades={btd?.trades}
-                    width={812}
-                    height={300}
-                  />
+                  <LineChart series={result.price_series} trades={btd?.trades} width={812} height={300} />
                 )}
 
                 <div style={{ marginTop: 28, marginBottom: 10 }}>
                   <div style={{ display: "flex", gap: 20, marginBottom: 12, flexWrap: "wrap" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                      <span style={{ width: 20, height: 2, background: COLORS.btdLine, display: "inline-block" }}/>
+                      <span style={{ width: 20, height: 2, background: COLORS.btdLine, display: "inline-block" }} />
                       BTD Portfolio Value
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: COLORS.textMuted, fontFamily: "monospace" }}>
-                      <span style={{ width: 20, height: 0, borderTop: `2px dashed ${COLORS.sipLine}`, display: "inline-block" }}/>
+                      <span style={{ width: 20, height: 0, borderTop: `2px dashed ${COLORS.sipLine}`, display: "inline-block" }} />
                       SIP Portfolio Value
                     </div>
                   </div>
@@ -765,9 +736,6 @@ export default function App() {
                 <div style={{
                   borderBottom: `1px solid ${COLORS.border}`,
                   padding: "10px 16px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
                 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: COLORS.textMuted, fontFamily: "monospace" }}>
                     BTD Trade Log — {btd.trades.length} entries
@@ -778,7 +746,7 @@ export default function App() {
                     <thead>
                       <tr style={{ borderBottom: `1px solid ${COLORS.border}` }}>
                         {["#", "Date", "Type", "Price", "Amount", "Shares"].map(h => (
-                          <th key={h} style={{ padding: "8px 16px", textAlign: "left", color: COLORS.textMuted, fontWeight: 500, whiteSpace: "nowrap" }}>{h}</th>
+                          <th key={h} style={{ padding: "8px 16px", textAlign: "left", color: COLORS.textMuted, fontWeight: 500 }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
