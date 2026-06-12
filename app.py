@@ -19,7 +19,6 @@ with st.sidebar:
         
         st.divider()
         st.subheader("Strategy Parameters")
-        # Changed to number inputs as requested
         dip_pct = st.number_input("Initial Dip Threshold (%)", value=5.0)
         sub_dip_pct = st.number_input("Subsequent Dip Threshold (%)", value=2.5)
         
@@ -29,15 +28,18 @@ with st.sidebar:
         
         run_btn = st.form_submit_button("Run Backtest")
 
-# Convert % inputs to decimals
-dip_threshold = dip_pct / 100
-subsequent_dip_threshold = sub_dip_pct / 100
+# ==========================================
+# HELPER FUNCTIONS
+# ==========================================
+def calculate_cagr(final_val, total_invested, start, end):
+    years = (pd.to_datetime(end) - pd.to_datetime(start)).days / 365.25
+    if years <= 0 or total_invested <= 0: return 0.0
+    return (((final_val / total_invested) ** (1/years)) - 1) * 100
 
 # ==========================================
 # EXECUTION LOGIC
 # ==========================================
 if run_btn:
-    # 1. Download Data
     data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, progress=False)
     if data.empty:
         st.error("No data found for this ticker/date range.")
@@ -45,74 +47,96 @@ if run_btn:
         
     df = data[['Close']].copy() if not isinstance(data.columns, pd.MultiIndex) else data['Close'].iloc[:, 0].to_frame(name='Close')
 
-    # 2. Strategy Calculation
+    # Strategy Calculation
     rolling_high = df['Close'].cummax()
     market_drawdown = (df['Close'] - rolling_high) / rolling_high
 
-    investment_triggers = []
-    shares_purchased = []
+    # Initialize columns
+    df['Btd_Invested_Amt'] = 0.0
+    df['Btd_Shares_Bought'] = 0.0
+    df['Sip_Invested_Amt'] = 0.0
+    df['Sip_Shares_Bought'] = 0.0
+
+    # BTD Logic
     last_buy_price = None
     has_triggered_initial_dip = False
-
-    for price, dd in zip(df['Close'], market_drawdown):
-        current_investment = 0
-        shares = 0
+    for i in range(len(df)):
+        price = df['Close'].iloc[i]
+        dd = market_drawdown.iloc[i]
+        
         if dd == 0:
             has_triggered_initial_dip = False
             last_buy_price = None
-        if not has_triggered_initial_dip and dd <= -dip_threshold:
+        
+        if not has_triggered_initial_dip and dd <= -(dip_pct/100):
             has_triggered_initial_dip = True
             last_buy_price = price
-            current_investment = investment_amount
-            shares = current_investment / price
+            df.iloc[i, df.columns.get_loc('Btd_Invested_Amt')] = investment_amount
+            df.iloc[i, df.columns.get_loc('Btd_Shares_Bought')] = investment_amount / price
         elif has_triggered_initial_dip and last_buy_price is not None:
-            if price <= last_buy_price * (1 - subsequent_dip_threshold):
+            if price <= last_buy_price * (1 - (sub_dip_pct/100)):
                 last_buy_price = price
-                current_investment = subsequent_investment_amount
-                shares = current_investment / price
-        investment_triggers.append(current_investment)
-        shares_purchased.append(shares)
+                df.iloc[i, df.columns.get_loc('Btd_Invested_Amt')] = subsequent_investment_amount
+                df.iloc[i, df.columns.get_loc('Btd_Shares_Bought')] = subsequent_investment_amount / price
 
-    df['Btd_Invested_Amt'] = investment_triggers
-    df['Btd_Shares_Bought'] = shares_purchased
-    df['Btd_Total_Shares'] = df['Btd_Shares_Bought'].cumsum()
-    df['Btd_Portfolio_Value'] = df['Btd_Total_Shares'] * df['Close']
-
-    # SIP
+    # SIP Logic
     df['Year_Month'] = df.index.to_period('M')
     is_first_day_of_month = df['Year_Month'] != df['Year_Month'].shift(1)
-    df['Sip_Invested_Amt'] = np.where(is_first_day_of_month, manual_sip_amount, 0.0)
+    df.loc[is_first_day_of_month, 'Sip_Invested_Amt'] = manual_sip_amount
     df['Sip_Shares_Bought'] = df['Sip_Invested_Amt'] / df['Close']
-    df['Sip_Total_Shares'] = df['Sip_Shares_Bought'].cumsum()
-    
-    # 3. Visualization
-    st.subheader("Performance Chart")
-    fig, ax = plt.subplots(figsize=(14, 7))
-    ax.plot(df.index, df['Close'], label='Close Price', color='royalblue', linewidth=1.5, alpha=0.4)
 
-    # Filter buy points
+    # Aggregation
+    df['Hybrid_Invested_Amt'] = df['Btd_Invested_Amt'] + df['Sip_Invested_Amt']
+    df['Hybrid_Total_Shares'] = df['Btd_Shares_Bought'].cumsum() + df['Sip_Shares_Bought'].cumsum()
+    df['Hybrid_Total_Cash'] = df['Hybrid_Invested_Amt'].cumsum()
+    df['Hybrid_Portfolio_Value'] = df['Hybrid_Total_Shares'] * df['Close']
+
+    # Performance Metrics
+    final_val = df['Hybrid_Portfolio_Value'].iloc[-1]
+    total_cash = df['Hybrid_Total_Cash'].iloc[-1]
+    profit = final_val - total_cash
+    strategy_return = (profit / total_cash) * 100 if total_cash > 0 else 0
+    
+    # Drawdown
+    hybrid_rolling_high = df['Hybrid_Portfolio_Value'].cummax()
+    hybrid_dd = (df['Hybrid_Portfolio_Value'] - hybrid_rolling_high) / hybrid_rolling_high
+    max_dd = hybrid_dd.min() * 100
+    
+    trades = len(df[df['Hybrid_Invested_Amt'] > 0])
+    avg_entry = total_cash / df['Hybrid_Total_Shares'].iloc[-1] if df['Hybrid_Total_Shares'].iloc[-1] > 0 else 0
+    cagr = calculate_cagr(final_val, total_cash, start_date, end_date)
+
+    # 1. Visualization
+    st.subheader("Performance Chart")
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(df.index, df['Close'], label='Close Price', color='royalblue', alpha=0.3)
+    
     initial_buys = df[df['Btd_Invested_Amt'] == investment_amount]
     subsequent_buys = df[df['Btd_Invested_Amt'] == subsequent_investment_amount]
     sip_buys = df[df['Sip_Invested_Amt'] > 0]
-
-    # Plot Scatter
-    ax.scatter(initial_buys.index, initial_buys['Close'], color='forestgreen', marker='^', s=100, label='BTD Initial Trigger', zorder=5)
-    ax.scatter(subsequent_buys.index, subsequent_buys['Close'], color='crimson', marker='^', s=60, label='BTD Subsequent', zorder=4)
-    ax.scatter(sip_buys.index, sip_buys['Close'], color='orange', marker='o', s=10, alpha=0.5, label='Monthly SIP', zorder=3)
-
-    ax.set_title(f'Buy Points for {ticker}')
+    
+    ax.scatter(initial_buys.index, initial_buys['Close'], color='green', marker='^', s=80, label='BTD Initial')
+    ax.scatter(subsequent_buys.index, subsequent_buys['Close'], color='red', marker='^', s=40, label='BTD Subsequent')
+    ax.scatter(sip_buys.index, sip_buys['Close'], color='orange', marker='o', s=10, alpha=0.5, label='SIP')
+    
     ax.legend()
     st.pyplot(fig)
 
-    # 4. Metrics
+    # 2. Metrics Table
+    st.subheader("Strategy Performance Summary")
     col1, col2 = st.columns(2)
-    final_val = (df['Btd_Total_Shares'].iloc[-1] + df['Sip_Total_Shares'].iloc[-1]) * df['Close'].iloc[-1]
-    total_cash = df['Btd_Invested_Amt'].sum() + df['Sip_Invested_Amt'].sum()
     
     with col1:
-        st.metric("Total Deployed", f"${total_cash:,.2f}")
+        st.write(f"**Total Cash Deployed:** ${total_cash:,.2f}")
+        st.write(f"**Final Portfolio Value:** ${final_val:,.2f}")
+        st.write(f"**Net Profit/Loss:** ${profit:,.2f}")
+        st.write(f"**Strategy Return:** {strategy_return:.2f}%")
+        
     with col2:
-        st.metric("Final Value", f"${final_val:,.2f}", f"{((final_val/total_cash)-1)*100:.2f}%")
+        st.write(f"**Max Strategy Drawdown:** {max_dd:.2f}%")
+        st.write(f"**Total Number of Trades:** {trades}")
+        st.write(f"**Average Entry Price:** ${avg_entry:,.2f}")
+        st.write(f"**Strategy CAGR:** {cagr:.2f}%")
 
 else:
     st.info("Adjust parameters in the sidebar and click 'Run Backtest' to see results.")
